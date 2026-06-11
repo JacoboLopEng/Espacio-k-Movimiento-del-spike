@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Espacio-k: spike en movimiento</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0d0d1a;
+    color: #e8e8f0;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 32px 16px;
+    gap: 24px;
+  }
+  h1 {
+    font-size: 18px;
+    font-weight: 500;
+    color: #c8c8e8;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .subtitle {
+    font-size: 13px;
+    color: #7070a0;
+    text-align: center;
+    margin-top: -16px;
+  }
+  .canvases {
+    display: flex;
+    gap: 32px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  .panel-label {
+    font-size: 13px;
+    color: #8080b0;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+  canvas {
+    border: 1px solid #2a2a4a;
+    border-radius: 8px;
+  }
+  .info-box {
+    background: #12122a;
+    border: 1px solid #2a2a4a;
+    border-radius: 10px;
+    padding: 12px 20px;
+    font-size: 13px;
+    color: #a0a0c8;
+    min-width: 200px;
+    text-align: center;
+    line-height: 1.8;
+  }
+  .info-box span {
+    color: #e0e0ff;
+    font-weight: 500;
+  }
+  .controls {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .ctrl {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #8080b0;
+  }
+  select, input[type=range] {
+    background: #1a1a30;
+    border: 1px solid #3a3a5a;
+    color: #d0d0f0;
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 13px;
+    cursor: pointer;
+    outline: none;
+  }
+  select:focus, input[type=range]:focus {
+    border-color: #6060c0;
+  }
+  .btn-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  button {
+    background: #1a1a30;
+    color: #d0d0f0;
+    border: 1px solid #3a3a5a;
+    border-radius: 8px;
+    padding: 9px 20px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  button:hover { background: #22224a; border-color: #6060c0; }
+  button:active { transform: scale(0.97); }
+  button.rec {
+    border-color: #c04040;
+    color: #ff8080;
+  }
+  button.rec:hover { background: #2a1a1a; border-color: #ff5050; }
+  .rec-badge {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #ff4040;
+    margin-right: 6px;
+    animation: pulse 1s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .footer {
+    font-size: 11px;
+    color: #404060;
+    text-align: center;
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+
+<h1>El espacio-<em>k</em>: un spike en movimiento</h1>
+<p class="subtitle">Cada punto del espacio-k codifica una onda sinusoidal 2D</p>
+
+<div class="canvases" id="scene">
+  <div class="panel">
+    <div class="panel-label">Espacio-k</div>
+    <canvas id="kCanvas" width="280" height="280"></canvas>
+  </div>
+  <div class="panel">
+    <div class="panel-label">Imagen resultante</div>
+    <canvas id="imgCanvas" width="280" height="280"></canvas>
+  </div>
+</div>
+
+<div class="info-box" id="infoBox">
+  kx = <span id="kxVal">0</span> &nbsp;·&nbsp; ky = <span id="kyVal">0</span><br>
+  Frecuencia: <span id="freqVal">—</span> &nbsp;·&nbsp; Orientación: <span id="angleVal">—</span>
+</div>
+
+<div class="controls">
+  <div class="ctrl">
+    <label for="modeSelect">Trayectoria</label>
+    <select id="modeSelect">
+      <option value="horizontal">Horizontal →</option>
+      <option value="vertical">Vertical ↑</option>
+      <option value="diagonal">Diagonal ↗</option>
+      <option value="orbit">Órbita circular</option>
+    </select>
+  </div>
+  <div class="ctrl">
+    <label for="speedRange">Velocidad</label>
+    <input type="range" id="speedRange" min="1" max="5" value="2" step="1" style="width:80px">
+  </div>
+</div>
+
+<div class="btn-row">
+  <button id="playBtn" onclick="togglePlay()">⏸ Pausar</button>
+  <button id="recBtn" class="rec" onclick="toggleRecord()">⏺ Grabar vídeo</button>
+  <button onclick="downloadFrame()">📷 Capturar frame</button>
+</div>
+
+<p class="footer">El vídeo se descarga como .webm · Compatible con Notewise, Notion, Obsidian, etc.</p>
+
+<script>
+const N = 64;
+let playing = true;
+let t = 0;
+let raf;
+let mediaRecorder = null;
+let chunks = [];
+
+const kCtx = document.getElementById('kCanvas').getContext('2d');
+const imgCtx = document.getElementById('imgCanvas').getContext('2d');
+
+function getPos(mode, t) {
+  const maxR = 26;
+  const speed = +document.getElementById('speedRange').value;
+  const phase = t * speed * 0.025;
+  switch(mode) {
+    case 'horizontal': {
+      const v = (phase % (maxR * 2)) - maxR;
+      return { kx: Math.round(Math.max(-maxR, Math.min(maxR, v))), ky: 0 };
+    }
+    case 'vertical': {
+      const v = (phase % (maxR * 2)) - maxR;
+      return { kx: 0, ky: Math.round(Math.max(-maxR, Math.min(maxR, v))) };
+    }
+    case 'diagonal': {
+      const v = (phase % (maxR * 2)) - maxR;
+      const cv = Math.max(-maxR, Math.min(maxR, v));
+      return { kx: Math.round(cv), ky: Math.round(cv) };
+    }
+    case 'orbit':
+      return {
+        kx: Math.round(Math.cos(phase) * maxR * 0.75),
+        ky: Math.round(Math.sin(phase) * maxR * 0.75)
+      };
+  }
+}
+
+function cosWave(kx, ky) {
+  const data = new Float32Array(N * N);
+  for(let y = 0; y < N; y++) {
+    for(let x = 0; x < N; x++) {
+      data[y * N + x] = Math.cos(2 * Math.PI * (kx * x + ky * y) / N);
+    }
+  }
+  return data;
+}
+
+function drawKSpace(ctx, kx, ky) {
+  const W = 280, H = 280;
+  ctx.fillStyle = '#050510';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.strokeStyle = 'rgba(100,100,180,0.2)';
+  ctx.lineWidth = 0.5;
+  const cx = W/2, cy = H/2;
+  ctx.beginPath(); ctx.moveTo(cx,4); ctx.lineTo(cx,H-4); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(4,cy); ctx.lineTo(W-4,cy); ctx.stroke();
+
+  ctx.strokeStyle = 'rgba(100,100,180,0.08)';
+  for(let i = 1; i <= 3; i++) {
+    const r = i * (W/2 - 8) / 3.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI*2);
+    ctx.stroke();
+  }
+
+  const scale = (W/2 - 12) / 28;
+  const px = cx + kx * scale;
+  const py = cy - ky * scale;
+
+  if(kx !== 0 || ky !== 0) {
+    ctx.strokeStyle = 'rgba(120,120,220,0.4)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4,4]);
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(px, py); ctx.stroke();
+    ctx.setLineDash([]);
+    const px2 = cx - kx * scale;
+    const py2 = cy + ky * scale;
+    ctx.fillStyle = 'rgba(150,150,255,0.35)';
+    ctx.beginPath(); ctx.arc(px2, py2, 5, 0, Math.PI*2); ctx.fill();
+  }
+
+  const r = Math.sqrt(kx*kx + ky*ky);
+  const grd = ctx.createRadialGradient(px,py,1,px,py,10);
+  grd.addColorStop(0,'rgba(220,220,255,1)');
+  grd.addColorStop(0.5,'rgba(140,140,255,0.6)');
+  grd.addColorStop(1,'rgba(80,80,200,0)');
+  ctx.fillStyle = grd;
+  ctx.beginPath(); ctx.arc(px, py, 10, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI*2); ctx.fill();
+
+  ctx.fillStyle = 'rgba(150,150,220,0.7)';
+  ctx.font = '11px monospace';
+  ctx.fillText(`kx=${kx}  ky=${ky}`, 10, 20);
+
+  document.getElementById('kxVal').textContent = kx;
+  document.getElementById('kyVal').textContent = ky;
+  document.getElementById('freqVal').textContent = r > 0 ? r.toFixed(1) : '0 (DC)';
+  if(r > 0) {
+    const deg = Math.round(Math.atan2(-ky, kx) * 180 / Math.PI);
+    document.getElementById('angleVal').textContent = deg + '°';
+  } else {
+    document.getElementById('angleVal').textContent = '—';
+  }
+}
+
+function drawImage(ctx, wave) {
+  const W = 280, H = 280;
+  const cellW = W / N, cellH = H / N;
+  for(let y = 0; y < N; y++) {
+    for(let x = 0; x < N; x++) {
+      const v = wave[y * N + x];
+      const c = Math.round((v + 1) / 2 * 255);
+      ctx.fillStyle = `rgb(${c},${c},${c})`;
+      ctx.fillRect(x * cellW, y * cellH, Math.ceil(cellW)+1, Math.ceil(cellH)+1);
+    }
+  }
+}
+
+function frame() {
+  if(!playing) return;
+  const mode = document.getElementById('modeSelect').value;
+  const {kx, ky} = getPos(mode, t);
+  drawKSpace(kCtx, kx, ky);
+  drawImage(imgCtx, cosWave(kx, ky));
+  t++;
+  raf = requestAnimationFrame(frame);
+}
+
+function togglePlay() {
+  playing = !playing;
+  document.getElementById('playBtn').textContent = playing ? '⏸ Pausar' : '▶ Reanudar';
+  if(playing) frame();
+}
+
+document.getElementById('modeSelect').addEventListener('change', () => { t = 0; });
+
+function toggleRecord() {
+  if(mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+    return;
+  }
+  chunks = [];
+  const kC = document.getElementById('kCanvas');
+  const iC = document.getElementById('imgCanvas');
+
+  const combined = document.createElement('canvas');
+  combined.width = 640; combined.height = 320;
+  const cCtx = combined.getContext('2d');
+
+  const stream = combined.captureStream(30);
+  mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+  mediaRecorder.ondataavailable = e => chunks.push(e.data);
+  mediaRecorder.onstop = () => {
+    const blob = new Blob(chunks, { type: 'video/webm' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'kspace_spike.webm';
+    a.click();
+    document.getElementById('recBtn').innerHTML = '⏺ Grabar vídeo';
+    document.getElementById('recBtn').style.color = '#ff8080';
+  };
+  mediaRecorder.start();
+
+  document.getElementById('recBtn').innerHTML = '<span class="rec-badge"></span>Detener y guardar';
+  document.getElementById('recBtn').style.color = '#ff4040';
+
+  function renderCombined() {
+    cCtx.fillStyle = '#0d0d1a';
+    cCtx.fillRect(0,0,640,320);
+    cCtx.drawImage(kC, 20, 20, 280, 280);
+    cCtx.drawImage(iC, 340, 20, 280, 280);
+    cCtx.fillStyle = 'rgba(150,150,220,0.7)';
+    cCtx.font = '12px monospace';
+    cCtx.fillText('Espacio-k', 100, 15);
+    cCtx.fillText('Imagen resultante', 390, 15);
+    if(mediaRecorder && mediaRecorder.state === 'recording') {
+      requestAnimationFrame(renderCombined);
+    }
+  }
+  renderCombined();
+}
+
+function downloadFrame() {
+  const kC = document.getElementById('kCanvas');
+  const iC = document.getElementById('imgCanvas');
+  const combined = document.createElement('canvas');
+  combined.width = 640; combined.height = 320;
+  const cCtx = combined.getContext('2d');
+  cCtx.fillStyle = '#0d0d1a';
+  cCtx.fillRect(0,0,640,320);
+  cCtx.drawImage(kC, 20, 20, 280, 280);
+  cCtx.drawImage(iC, 340, 20, 280, 280);
+  const a = document.createElement('a');
+  a.href = combined.toDataURL('image/png');
+  a.download = 'kspace_frame.png';
+  a.click();
+}
+
+frame();
+</script>
+</body>
+</html>
